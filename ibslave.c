@@ -20,5 +20,34 @@
  * along with iB Slave.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+// code is tuned for ATtiny85
+
+#include "config.h"
+#include "owslave.h"
+#include <avr/io.h>
+#include <avr/interrupt.h>
+#include <avr/sleep.h>
+
+ISR (PCINT0_vect) {
+	ows_pin_change(OW_PIN & _BV(OW_P));
+}
+
 int main(void) {
+	// disable power to USI and ADC
+	PRR |= _BV(PRUSI);
+	PRR |= _BV(PRADC);
+
+	LED_INIT;
+
+	ows_init();
+
+	// set up pin change interrupts
+	GIMSK |= _BV(PCIE);
+	PCMSK |= _BV(PCINT3);
+
+	set_sleep_mode(SLEEP_MODE_IDLE);
+	sei();
+	while(1) {
+		sleep_mode();
+	}
 }

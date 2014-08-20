@@ -19,18 +19,23 @@
  * You should have received a copy of the GNU General Public License
  * along with iB Slave.  If not, see <http://www.gnu.org/licenses/>.
  */
-#ifndef _OWSLAVE_H
-#define _OWSLAVE_H
+#ifndef _CONFIG_H
+#define _CONFIG_H
 
-#include "config.h"
-#include <stdint.h>
+#define F_CPU 8000000UL
 
-#if !defined(F_CPU) || !defined(OW_DDR) || !defined(OW_PORT) || \
-		!defined(OW_PIN) || !defined(OW_P) || !defined(OW_ID)
-#	error "Required variable undefined (F_CPU, OW_DDR, OW_PORT, OW_PIN, OW_P, OW_ID)"
-#endif
+#define OW_ID {0xa1, 0xb2, 0xc3, 0xd4, 0xe5, 0xf6, 0x07, 0x18}
+#define OW_PORT PORTB
+#define OW_DDR DDRB
+#define OW_PIN PINB
+#define OW_P PB3
 
-void ows_init(void);
-void ows_pin_change(uint8_t value);
+#define LED_PORT PORTB
+#define LED_DDR DDRB
+#define LED_P PB4
+#define LED_INIT LED_PORT &= ~_BV(LED_P); LED_DDR |= _BV(LED_P);
+#define LED_ON LED_PORT |= _BV(LED_P);
+#define LED_OFF LED_PORT &= ~_BV(LED_P);
+#define LED_SW LED_PORT ^= _BV(LED_P);
 
-#endif // def _OWSLAVE_H
+#endif // ndef _CONFIG_H

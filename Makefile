@@ -23,7 +23,7 @@ TARGET = ibslave
 # to get a full listing.
 AVRDUDE_PROGRAMMER = arduino
 
-AVRDUDE_PORT = /dev/ttyUSB0
+AVRDUDE_PORT = /dev/ttyUSB1
 
 AVRDUDE_BAUDRATE = 19200
 
@@ -37,7 +37,7 @@ OPT = s
 FORMAT = ihex
 
 # List C source files here. (C dependencies are automatically generated.)
-SRC = $(TARGET).c
+SRC = $(TARGET).c owslave.c
 
 # If there is more than one source file, append them above, or modify and
 # uncomment the following:
