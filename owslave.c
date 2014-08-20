@@ -27,97 +27,158 @@
 
 #define OW_PULL_BUS_LOW \
 			transmit = 1; \
-            OW_DDR |= _BV(OW_P); \
-            OW_PORT &= ~_BV(OW_P);
+			OW_DDR |= _BV(OW_P); \
+			OW_PORT &= ~_BV(OW_P);
 
 #define OW_RELEASE_BUS \
-            OW_DDR &= ~_BV(OW_P); \
-            OW_PORT |= _BV(OW_P); \
+			OW_DDR &= ~_BV(OW_P); \
+			OW_PORT |= _BV(OW_P); \
 			transmit = 0;
+#define OW_READ (OW_PIN & _BV(OW_P))
+
+// timers (us)
+#define T_ZERO 70
+#define T_PRESENCE 70
+#define T_SAMPLE 10
 
 // main states
 #define ST_IDLE 0		// idle
-#define ST_IDLE_LOW 1	// bus low when idle
-#define ST_RESET		// reset pulse detected
-#define ST_PRESENCE 2	// transmiting presence pulse
-#define ST_RECVROM 3	// receiving ROM command
+#define ST_RESET 2		// reset pulse detected
+#define ST_PRESENCE 3	// transmiting presence pulse
+#define ST_RECV_ROM 4	// receiving ROM command
+#define ST_SEND_ID 5		// sending ID
 
 uint8_t status;			// main status
-uint8_t transmit;		// transmitting (holding bus low)
+uint8_t transmit;
 
-uint8_t recv_buf; 		// receive bit buffer
-uint8_t recv_cnt;		// receive bit counter
+uint8_t buf; 		// bit buffer
+uint8_t cnt;		// bit counter
 
-#define TIMER TCNT0
+const uint8_t id[] = {0xa1, 0xb2, 0xc3, 0xd4, 0xe5, 0xf6, 0x07, 0x18};
+uint8_t id_cnt;
+
+#define RESET_TIMER TCNT0
+#define IO_TIMER TCNT1
 
 void ows_init(uint8_t) {
 	status = ST_IDLE;
 	transmit = 0;
 
-	// set counter to 1us ticks
+	// set timer 0 to 1us, timer 1 to 2us ticks
 #if F_CPU_M == 1
-	// clkIO clock source, no prescaling
+	// timer 0: clkIO clock source, no prescaling
 	TCCR0B |= _BV(CS00);
+	// timer 1: clkIO/2
+	TCCR1 |= _BV(CS11);
 #elif F_CPU_M == 8
-	// clkIO/8 clock source
+	// timer 0: clkIO/8 clock source
 	TCCR0B |= _BV(CS01);
+	// timer 1: clkIO/16
+	TCCR1 |= _BV(CS12);
+	TCCR1 |= _BV(CS10);
 #else
 #	error "Unsupported system frequency (only 1 or 8 MHz supported)"
 #endif
+	// reset timeout (in 2us units)
+	OCR1A = 238; // a little lower than 480us
 }
 
-void reset_timer(uint8_t) {
-	// stop timer
-	GTCCR |= _BV(TSM);
-	GTCCR |= _BV(PSR0);
+void start_reset_timer() {
+	RESET_TIMER = 0;
+	TIMSK |= _BV(OCIE1A);
+}
 
-	TIMER = 0;
-
-	// start timer
-	GTCCR &= ~_BV(TSM);
+void stop_reset_timer() {
+	// mask timer interrupt
+	TIMSK &= ~_BV(OVIE1A);
 }
 
 void set_alarm(uint8_t time) {
-	// stop timer
-	GTCCR |= _BV(TSM);
-	GTCCR |= _BV(PSR0);
-
+	IO_TIMER = 0;
 	// enable timer compare interrupt
-	TIMSK |= _BV(OCIE0A);
 	OCR0A = time;
+	TIMSK |= _BV(OCIE0A);
+}
 
-	TIMER = 0;
+void clear_alarm() {
+	// mask timer interrupt
+	TIMSK &= ~_BV(OCIE0A);
+}
 
-	// start timer
-	GTCCR &= ~_BV(TSM);
+// reset handler
+ISR (TIMER1_COMPA_vect) {
+	stop_reset_timer();
+	status = ST_RESET;
 }
 
 // alarm handler
 ISR (TIMER0_COMPA_vect) {
+	clear_alarm();
+	if (transmit) {
+		OW_RELEASE_BUS;
+	}
 	switch (status) {
-		case ST_IDLE_LOW:
-			// reset pulse threshold reached
-			status = ST_RESET;
-			break;
 		case ST_PRESENCE:
-			OW_RELEASE_BUS;
-			recv_buf = recv_cnt = 0;
+			buf = cnt = 0;
 			status = ST_RECVROM;
-	} else if (transmit) {
-			OW_RELEASE_BUS;
+			break;
+		case ST_RECV_ROM:
+			if (OW_READ) {
+				buf |= _BV(cnt);
+			}
+			cnt++;
+			if (cnt >= 8) {
+				if (buf == CMD_READ_ROM) {
+					status = ST_SEND_ID;
+					id_cnt = 0;
+					buf = id[id_cnt];
+					cnt = 0;
+				}
+			}
+			break;
+		case ST_SEND_ID:
+			// timeout on write zero
 	}
 }
 
 // should be called when change is detected on the data pin
 void ows_pin_change(uint8_t value) {
-	switch (status) {
-		case ST_RESET:
-			if (value) {
-				status = ST_PRESENCE;
-				OW_PULL_BUS_LOW;
-				set_alarm(60);
-			}
-			break;
+	if (!value) {
+		start_reset_timer();
+		switch (status) {
+			case ST_RECV_ROM:
+				// receiving bit
+				set_alarm(T_SAMPLE);
+				break;
+			case ST_SEND_ID:
+				// sending ID
+				if (!(buf & 1)) {
+					// write zero
+					OW_PULL_BUS_LOW;
+					set_alarm(T_ZERO);
+				}
+				// set next bit
+				cnt++;
+				if (cnt >= 8) {
+					cnt = 0;
+					id_cnt++;
+					if (id_cnt < 8) {
+						buf = id[id_cnt];
+					} else {
+						// finished, return to idle
+						status = ST_IDLE;
+					}
+				}
+				break;
+		}
+	} else { // (value)
+		stop_reset_timer();
+		if (status == ST_RESET) {
+			status = ST_PRESENCE;
+			OW_PULL_BUS_LOW;
+			set_alarm(T_PRESENCE);
+			reset_timer();
+		}
 	}
 }
 
