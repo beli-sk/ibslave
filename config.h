@@ -23,6 +23,7 @@
 #define _CONFIG_H
 
 //#define DEBUG
+//#define DEBUG_LED
 
 #define F_CPU 16000000UL
 
@@ -32,7 +33,7 @@
 #define OW_PIN PINB
 #define OW_P PB3
 
-#ifdef DEBUG
+#if defined(DEBUG) || defined(DEBUG_LED)
 #	define LED_PORT PORTB
 #	define LED_DDR DDRB
 #	define LED_P PB4
@@ -45,7 +46,7 @@
 #	define LED_ON
 #	define LED_OFF
 #	define LED_SW
-#endif // def DEBUG
+#endif // def DEBUG || DEBUG_LED
 
 #ifdef DEBUG
 #	define DBG_PORT PORTB
