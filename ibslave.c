@@ -28,10 +28,6 @@
 #include <avr/interrupt.h>
 #include <avr/sleep.h>
 
-ISR (PCINT0_vect) {
-	ows_pin_change(OW_PIN & _BV(OW_P));
-}
-
 int main(void) {
 	// disable power to USI and ADC
 	PRR |= _BV(PRUSI);
@@ -41,13 +37,9 @@ int main(void) {
 
 	ows_init();
 
-	// set up pin change interrupts
-	GIMSK |= _BV(PCIE);
-	PCMSK |= _BV(PCINT3);
-
 	set_sleep_mode(SLEEP_MODE_IDLE);
 	sei();
 	while(1) {
-		sleep_mode();
+		//sleep_mode(); // TODO: only when ST_IDLE
 	}
 }

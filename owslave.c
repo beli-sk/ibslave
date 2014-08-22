@@ -28,8 +28,8 @@
 
 #define OW_PULL_BUS_LOW \
 			transmit = 1; \
-			OW_DDR |= _BV(OW_P); \
-			OW_PORT &= ~_BV(OW_P);
+			OW_PORT &= ~_BV(OW_P); \
+			OW_DDR |= _BV(OW_P);
 
 #define OW_RELEASE_BUS \
 			OW_DDR &= ~_BV(OW_P); \
@@ -73,9 +73,9 @@ uint8_t id_cnt;
 
 void ows_init(void) {
 	status = ST_IDLE;
-	transmit = 0;
 	DBG_INIT;
 	DBG_OUT(status);
+	OW_RELEASE_BUS;
 
 	// set timer 0 to 1us, timer 1 to 2us ticks
 #if F_CPU == 1000000UL
@@ -100,6 +100,10 @@ void ows_init(void) {
 #endif
 	// reset timeout (in 2us units)
 	OCR1A = 200; // a little lower than 400us
+
+	// set up pin change interrupt
+	GIMSK |= _BV(PCIE);
+	PCMSK |= _BV(PCINT3);
 }
 
 void start_reset_timer(void) {
@@ -131,7 +135,6 @@ ISR (TIMER1_COMPA_vect) {
 	stop_reset_timer();
 	status = ST_RESET;
 	DBG_OUT(status);
-	LED_OFF;
 }
 
 // alarm handler
@@ -149,9 +152,7 @@ ISR (TIMER0_COMPA_vect) {
 		case ST_RECV_ROM:
 			if (OW_READ) {
 				buf |= _BV(cnt);
-				LED_ON;
 			} else {
-				LED_OFF;
 				;
 			}
 			cnt++;
@@ -188,8 +189,14 @@ ISR (TIMER0_COMPA_vect) {
 }
 
 // change is detected on the data pin
-void ows_pin_change(uint8_t value) {
-	if (!value) {
+ISR (PCINT0_vect) {
+	if (transmit) {
+		return;
+	}
+	if (!OW_READ) {
+		// read 0
+		start_reset_timer();
+		LED_OFF;
 		switch (status) {
 			case ST_RECV_ROM:
 				// receiving bit
@@ -204,8 +211,9 @@ void ows_pin_change(uint8_t value) {
 				set_alarm(T_ZERO);
 				break;
 		}
-		start_reset_timer();
-	} else { // (value)
+	} else {
+		// read 1
+		LED_ON;
 		stop_reset_timer();
 		if (status == ST_RESET) {
 			status = ST_PRESENCE;
