@@ -22,20 +22,40 @@
 #ifndef _CONFIG_H
 #define _CONFIG_H
 
-#define F_CPU 8000000UL
+//#define DEBUG
 
-#define OW_ID {0xa1, 0xb2, 0xc3, 0xd4, 0xe5, 0xf6, 0x07, 0x18}
+#define F_CPU 16000000UL
+
+#define OW_ID {0x33, 0x33, 0x33, 0x33, 0x33, 0x33, 0x33, 0xf3}
 #define OW_PORT PORTB
 #define OW_DDR DDRB
 #define OW_PIN PINB
 #define OW_P PB3
 
-#define LED_PORT PORTB
-#define LED_DDR DDRB
-#define LED_P PB4
-#define LED_INIT LED_PORT &= ~_BV(LED_P); LED_DDR |= _BV(LED_P);
-#define LED_ON LED_PORT |= _BV(LED_P);
-#define LED_OFF LED_PORT &= ~_BV(LED_P);
-#define LED_SW LED_PORT ^= _BV(LED_P);
+#ifdef DEBUG
+#	define LED_PORT PORTB
+#	define LED_DDR DDRB
+#	define LED_P PB4
+#	define LED_INIT LED_PORT &= ~_BV(LED_P); LED_DDR |= _BV(LED_P);
+#	define LED_ON LED_PORT |= _BV(LED_P);
+#	define LED_OFF LED_PORT &= ~_BV(LED_P);
+#	define LED_SW LED_PORT ^= _BV(LED_P);
+#else
+#	define LED_INIT
+#	define LED_ON
+#	define LED_OFF
+#	define LED_SW
+#endif // def DEBUG
+
+#ifdef DEBUG
+#	define DBG_PORT PORTB
+#	define DBG_DDR DDRB
+#	define DBG_MASK 0x07
+#	define DBG_INIT (DBG_DDR |= DBG_MASK)
+#	define DBG_OUT(x) (DBG_PORT = (DBG_PORT & ~DBG_MASK) | (x & DBG_MASK))
+#else
+#   define DBG_INIT
+#   define DBG_OUT(x)
+#endif // def DEBUG
 
 #endif // ndef _CONFIG_H

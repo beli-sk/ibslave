@@ -35,12 +35,20 @@
 			OW_DDR &= ~_BV(OW_P); \
 			OW_PORT |= _BV(OW_P); \
 			transmit = 0;
+
 #define OW_READ (OW_PIN & _BV(OW_P))
 
 // timers (us)
-#define T_ZERO 70
+#if F_CPU == 16000000UL
+// counter runs at 0.5us intervals, double the values
+#define T_ZERO 90
+#define T_PRESENCE 140
+#define T_SAMPLE 30
+#else
+#define T_ZERO 45
 #define T_PRESENCE 70
-#define T_SAMPLE 40
+#define T_SAMPLE 15
+#endif
 
 // main states
 #define ST_IDLE 0		// idle
@@ -49,7 +57,7 @@
 #define ST_RECV_ROM 4	// receiving ROM command
 #define ST_SEND_ID 5		// sending ID
 
-#define CMD_READ_ROM 33
+#define CMD_READ_ROM 0x33
 
 uint8_t status;			// main status
 uint8_t transmit;
@@ -66,24 +74,32 @@ uint8_t id_cnt;
 void ows_init(void) {
 	status = ST_IDLE;
 	transmit = 0;
+	DBG_INIT;
+	DBG_OUT(status);
 
 	// set timer 0 to 1us, timer 1 to 2us ticks
-#if F_CPU == 1000000
+#if F_CPU == 1000000UL
 	// timer 0: clkIO clock source, no prescaling
 	TCCR0B |= _BV(CS00);
 	// timer 1: clkIO/2
 	TCCR1 |= _BV(CS11);
-#elif F_CPU == 8000000
+#elif F_CPU == 8000000UL
 	// timer 0: clkIO/8 clock source
 	TCCR0B |= _BV(CS01);
 	// timer 1: clkIO/16
 	TCCR1 |= _BV(CS12);
 	TCCR1 |= _BV(CS10);
+#elif F_CPU == 16000000UL
+	// timer 0: clkIO/8 clock source (0.5us, delays adjusted)
+	TCCR0B |= _BV(CS01);
+	// timer1: clkIO/32
+	TCCR1 |= _BV(CS12);
+	TCCR1 |= _BV(CS11);
 #else
 #	error "Unsupported system frequency (only 1 or 8 MHz supported)"
 #endif
 	// reset timeout (in 2us units)
-	OCR1A = 240; // a little lower than 480us
+	OCR1A = 200; // a little lower than 400us
 }
 
 void start_reset_timer(void) {
@@ -114,7 +130,8 @@ void clear_alarm(void) {
 ISR (TIMER1_COMPA_vect) {
 	stop_reset_timer();
 	status = ST_RESET;
-	LED_ON;
+	DBG_OUT(status);
+	LED_OFF;
 }
 
 // alarm handler
@@ -127,31 +144,52 @@ ISR (TIMER0_COMPA_vect) {
 		case ST_PRESENCE:
 			buf = cnt = 0;
 			status = ST_RECV_ROM;
+			DBG_OUT(status);
 			break;
 		case ST_RECV_ROM:
 			if (OW_READ) {
 				buf |= _BV(cnt);
+				LED_ON;
+			} else {
+				LED_OFF;
+				;
 			}
 			cnt++;
-			if (cnt == 6) {
-				LED_OFF;
-			}
 			if (cnt >= 8) {
 				if (buf == CMD_READ_ROM) {
 					status = ST_SEND_ID;
+					DBG_OUT(status);
 					id_cnt = 0;
 					buf = id[id_cnt];
 					cnt = 0;
+				} else {
+					status = ST_IDLE;
+					DBG_OUT(status);
+				}
+			}
+			break;
+		case ST_SEND_ID:
+			// set next bit
+			buf >>= 1;
+			cnt++;
+			if (cnt >= 8) {
+				cnt = 0;
+				id_cnt++;
+				if (id_cnt < 8) {
+					buf = id[id_cnt];
+				} else {
+					// finished, return to idle
+					status = ST_IDLE;
+					DBG_OUT(status);
 				}
 			}
 			break;
 	}
 }
 
-// should be called when change is detected on the data pin
+// change is detected on the data pin
 void ows_pin_change(uint8_t value) {
 	if (!value) {
-		start_reset_timer();
 		switch (status) {
 			case ST_RECV_ROM:
 				// receiving bit
@@ -162,26 +200,16 @@ void ows_pin_change(uint8_t value) {
 				if (!(buf & 1)) {
 					// write zero
 					OW_PULL_BUS_LOW;
-					set_alarm(T_ZERO);
 				}
-				// set next bit
-				cnt++;
-				if (cnt >= 8) {
-					cnt = 0;
-					id_cnt++;
-					if (id_cnt < 8) {
-						buf = id[id_cnt];
-					} else {
-						// finished, return to idle
-						status = ST_IDLE;
-					}
-				}
+				set_alarm(T_ZERO);
 				break;
 		}
+		start_reset_timer();
 	} else { // (value)
 		stop_reset_timer();
 		if (status == ST_RESET) {
 			status = ST_PRESENCE;
+			DBG_OUT(status);
 			OW_PULL_BUS_LOW;
 			set_alarm(T_PRESENCE);
 		}
