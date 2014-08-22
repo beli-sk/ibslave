@@ -30,6 +30,29 @@
 #	error "Required variable undefined (F_CPU, OW_DDR, OW_PORT, OW_PIN, OW_P, OW_ID)"
 #endif
 
+// timers (us)
+#if F_CPU == 16000000UL
+// counter runs at 0.5us intervals, double the values
+#	define T_ZERO 90
+#	define T_PRESENCE 140
+#	define T_SAMPLE 30
+#else
+#	define T_ZERO 45
+#	define T_PRESENCE 70
+#	define T_SAMPLE 15
+#endif
+
+// main states
+#define ST_IDLE 0		// idle
+#define ST_RESET 2		// reset pulse detected
+#define ST_PRESENCE 3	// transmiting presence pulse
+#define ST_RECV_ROM 4	// receiving ROM command
+#define ST_SEND_ID 5		// sending ID
+
+#define CMD_READ_ROM 0x33
+
+extern uint8_t status;			// main status
+
 void ows_init(void);
 void ows_pin_change(uint8_t value);
 

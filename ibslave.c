@@ -40,6 +40,8 @@ int main(void) {
 	set_sleep_mode(SLEEP_MODE_IDLE);
 	sei();
 	while(1) {
-		//sleep_mode(); // TODO: only when ST_IDLE
+		if (status == ST_IDLE) {
+			sleep_mode();
+		}
 	}
 }

@@ -38,29 +38,8 @@
 
 #define OW_READ (OW_PIN & _BV(OW_P))
 
-// timers (us)
-#if F_CPU == 16000000UL
-// counter runs at 0.5us intervals, double the values
-#define T_ZERO 90
-#define T_PRESENCE 140
-#define T_SAMPLE 30
-#else
-#define T_ZERO 45
-#define T_PRESENCE 70
-#define T_SAMPLE 15
-#endif
-
-// main states
-#define ST_IDLE 0		// idle
-#define ST_RESET 2		// reset pulse detected
-#define ST_PRESENCE 3	// transmiting presence pulse
-#define ST_RECV_ROM 4	// receiving ROM command
-#define ST_SEND_ID 5		// sending ID
-
-#define CMD_READ_ROM 0x33
-
-uint8_t status;			// main status
 uint8_t transmit;
+uint8_t status;			// main status
 
 uint8_t buf; 		// bit buffer
 uint8_t cnt;		// bit counter
@@ -79,11 +58,13 @@ void ows_init(void) {
 
 	// set timer 0 to 1us, timer 1 to 2us ticks
 #if F_CPU == 1000000UL
+#	warning "Works correctly only at 16MHz"
 	// timer 0: clkIO clock source, no prescaling
 	TCCR0B |= _BV(CS00);
 	// timer 1: clkIO/2
 	TCCR1 |= _BV(CS11);
 #elif F_CPU == 8000000UL
+#	warning "Works correctly only at 16MHz"
 	// timer 0: clkIO/8 clock source
 	TCCR0B |= _BV(CS01);
 	// timer 1: clkIO/16
@@ -96,7 +77,7 @@ void ows_init(void) {
 	TCCR1 |= _BV(CS12);
 	TCCR1 |= _BV(CS11);
 #else
-#	error "Unsupported system frequency (only 1 or 8 MHz supported)"
+#	error "Unsupported system frequency (only 1, 8 and 16 MHz supported)"
 #endif
 	// reset timeout (in 2us units)
 	OCR1A = 200; // a little lower than 400us
