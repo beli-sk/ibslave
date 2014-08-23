@@ -196,11 +196,6 @@ void ows_init(void) {
 	// timer 0: clkIO/256 clock source, 32ms ticks
 	TCCR0B |= _BV(CS02);
 	OCR0A = T_RESET /32;
-#elif F_CPU == 1000000UL
-	// timer 0: clkIO/64 clock source, 64ms ticks
-	TCCR0B |= _BV(CS01);
-	TCCR0B |= _BV(CS00);
-	OCR0A = T_RESET /64;
 #else
 #	error "Unsupported system frequency"
 #endif
