@@ -1,2 +1,2 @@
 Fuse configuration for ATtiny85:
-H:FF, E:DF, L:E1
+H:FF, E:DD, L:C2
