@@ -43,20 +43,26 @@ volatile uint8_t status;	// status event
 uint8_t buf; 		// bit buffer
 uint8_t cnt;		// bit counter
 
+/*** INTERNAL FUNCTIONS ***/
+
+/* low level signaling */
+
+// wait for low level
 void wait_fall(void) {
 	while(OW_READ && !EVENT);
 }
 
+// wait for high level
 void wait_raise(void) {
 	while(!OW_READ && !EVENT);
 }
 
-void ow_write_one(void) {
+void write_one(void) {
 	wait_fall();
 	wait_raise();
 }
 
-void ow_write_zero(void) {
+void write_zero(void) {
 	wait_fall();
 	OW_PULL_BUS_LOW;
 	_delay_us(T_ZERO);
@@ -64,35 +70,14 @@ void ow_write_zero(void) {
 }
 
 // returns zero/non-zero
-uint8_t ow_read_bit(void) {
+uint8_t read_bit(void) {
 	wait_raise();
 	wait_fall();
 	_delay_us(T_SAMPLE);
 	return OW_READ;
 }
 
-uint8_t ow_read_byte(void) {
-	wait_raise();
-	buf = 0;
-	for (cnt = 0; cnt < 8 && !EVENT; ++cnt) {
-		if (ow_read_bit()) {
-			buf |= _BV(cnt);
-		}
-	}
-	return buf;
-}
-
-void ow_write_byte(uint8_t val) {
-	wait_raise();
-	for (cnt = 0; cnt < 8 && !EVENT; ++cnt) {
-		if (val & 1) {
-			ow_write_one();
-		} else {
-			ow_write_zero();
-		}
-		val >>= 1;
-	}
-}
+/* timer control */
 
 void enable_pcint(void) {
 	GIFR = _BV(PCIF);
@@ -101,55 +86,6 @@ void enable_pcint(void) {
 
 void disable_pcint(void) {
 	GIMSK &= ~_BV(PCIE);
-}
-
-void ow_wait_reset(void) {
-	enable_pcint();
-	while(1) {
-		cli();
-		if (status != ST_RESET && OW_READ) {
-			LED_ON;
-			sleep_enable();
-			sei();
-			sleep_cpu();
-			sleep_disable();
-		}
-		sei();
-		LED_OFF;
-		if (status == ST_RESET) {
-			break;
-		}
-	}
-	sei();
-	status = ST_NORMAL;
-}
-
-void ow_present(void) {
-	wait_raise();
-	_delay_us(15);
-	OW_PULL_BUS_LOW;
-	_delay_us(T_PRESENCE);
-	OW_RELEASE_BUS;
-}
-
-void ows_init(void) {
-	status = ST_NORMAL;
-	DBG_INIT;
-	DBG_OUT(status);
-	OW_RELEASE_BUS;
-
-#if F_CPU == 8000000UL
-	// timer 0: clkIO/256 clock source, 32ms ticks
-	TCCR0B |= _BV(CS02);
-	OCR0A = T_RESET /32;
-#else
-#	error "Unsupported system frequency"
-#endif
-
-	// set up pin change interrupt
-	PCMSK |= _BV(PCINT3);
-
-	set_sleep_mode(SLEEP_MODE_PWR_DOWN);
 }
 
 void reset_timer(void) {
@@ -163,10 +99,6 @@ void reset_timer(void) {
 void stop_reset_timer(void) {
 	// mask timer interrupt
 	TIMSK &= ~_BV(OCIE0A);
-}
-
-void ow_stop_timeout(void) {
-	TIMSK &= ~_BV(TOIE0);
 }
 
 // reset handler
@@ -191,5 +123,91 @@ ISR (PCINT0_vect) {
 		// read 1
 		stop_reset_timer();
 	}
+}
+
+/*** PUBLIC INTERFACE ***/
+
+// stop timer after end of session
+void ow_stop_timeout(void) {
+	TIMSK &= ~_BV(TOIE0);
+}
+
+uint8_t ow_read_byte(void) {
+	wait_raise();
+	buf = 0;
+	for (cnt = 0; cnt < 8 && !EVENT; ++cnt) {
+		if (read_bit()) {
+			buf |= _BV(cnt);
+		}
+	}
+	return buf;
+}
+
+void ow_write_byte(uint8_t val) {
+	wait_raise();
+	for (cnt = 0; cnt < 8 && !EVENT; ++cnt) {
+		if (val & 1) {
+			write_one();
+		} else {
+			write_zero();
+		}
+		val >>= 1;
+	}
+}
+
+// sleep and wait for reset
+void ow_wait_reset(void) {
+	enable_pcint();
+	while(1) {
+		cli();
+		if (status != ST_RESET && OW_READ) {
+			LED_ON;
+			sleep_enable();
+			sei();
+			sleep_cpu();
+			sleep_disable();
+		}
+		sei();
+		LED_OFF;
+		if (status == ST_RESET) {
+			break;
+		}
+	}
+	sei();
+	status = ST_NORMAL;
+}
+
+// send presence pulse
+void ow_present(void) {
+	wait_raise();
+	_delay_us(15);
+	OW_PULL_BUS_LOW;
+	_delay_us(T_PRESENCE);
+	OW_RELEASE_BUS;
+}
+
+void ows_init(void) {
+	status = ST_NORMAL;
+	DBG_INIT;
+	DBG_OUT(status);
+	OW_RELEASE_BUS;
+
+#if F_CPU == 8000000UL
+	// timer 0: clkIO/256 clock source, 32ms ticks
+	TCCR0B |= _BV(CS02);
+	OCR0A = T_RESET /32;
+#elif F_CPU == 1000000UL
+	// timer 0: clkIO/64 clock source, 64ms ticks
+	TCCR0B |= _BV(CS01);
+	TCCR0B |= _BV(CS00);
+	OCR0A = T_RESET /64;
+#else
+#	error "Unsupported system frequency"
+#endif
+
+	// set up pin change interrupt
+	PCMSK |= _BV(PCINT3);
+
+	set_sleep_mode(SLEEP_MODE_PWR_DOWN);
 }
 
