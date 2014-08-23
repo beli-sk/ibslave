@@ -26,22 +26,37 @@
 #include "owslave.h"
 #include <avr/io.h>
 #include <avr/interrupt.h>
-#include <avr/sleep.h>
+#include <stdint.h>
+
+const uint8_t id[] = OW_ID;
+uint8_t id_cnt;
 
 int main(void) {
 	// disable power to USI and ADC
 	PRR |= _BV(PRUSI);
 	PRR |= _BV(PRADC);
+	PRR |= _BV(PRTIM1);
+	// disable pull-ups
+	MCUCR |= _BV(PUD);
 
 	LED_INIT;
 
 	ows_init();
 
-	set_sleep_mode(SLEEP_MODE_IDLE);
 	sei();
+
 	while(1) {
-		if (status == ST_IDLE) {
-			sleep_mode();
+		ow_wait_reset();
+		ow_present();
+		if (ow_read_byte() == CMD_READ_ROM) {
+			for (id_cnt = 0; id_cnt < 8; ++id_cnt) {
+				ow_write_byte(id[id_cnt]);
+			}
 		}
-	}
+		if (status == ST_TIMEOUT) {
+			status = ST_NORMAL;
+		} else {
+			ow_stop_timeout();
+		}
+	} // while(1)
 }

@@ -25,183 +25,171 @@
 #include <avr/io.h>
 #include <avr/interrupt.h>
 #include <stdint.h>
+#include <util/delay.h>
+#include <avr/sleep.h>
 
 #define OW_PULL_BUS_LOW \
-			transmit = 1; \
 			OW_PORT &= ~_BV(OW_P); \
 			OW_DDR |= _BV(OW_P);
 
 #define OW_RELEASE_BUS \
 			OW_DDR &= ~_BV(OW_P); \
-			OW_PORT |= _BV(OW_P); \
-			transmit = 0;
+			OW_PORT |= _BV(OW_P);
 
 #define OW_READ (OW_PIN & _BV(OW_P))
 
-uint8_t transmit;
-uint8_t status;			// main status
+volatile uint8_t status;	// status event
 
 uint8_t buf; 		// bit buffer
 uint8_t cnt;		// bit counter
 
-const uint8_t id[] = OW_ID;
-uint8_t id_cnt;
+void wait_fall(void) {
+	while(OW_READ && !EVENT);
+}
 
-#define RESET_TIMER TCNT1
-#define IO_TIMER TCNT0
+void wait_raise(void) {
+	while(!OW_READ && !EVENT);
+}
+
+void ow_write_one(void) {
+	wait_fall();
+	wait_raise();
+}
+
+void ow_write_zero(void) {
+	wait_fall();
+	OW_PULL_BUS_LOW;
+	_delay_us(T_ZERO);
+	OW_RELEASE_BUS;
+}
+
+// returns zero/non-zero
+uint8_t ow_read_bit(void) {
+	wait_raise();
+	wait_fall();
+	_delay_us(T_SAMPLE);
+	return OW_READ;
+}
+
+uint8_t ow_read_byte(void) {
+	wait_raise();
+	buf = 0;
+	for (cnt = 0; cnt < 8 && !EVENT; ++cnt) {
+		if (ow_read_bit()) {
+			buf |= _BV(cnt);
+		}
+	}
+	return buf;
+}
+
+void ow_write_byte(uint8_t val) {
+	wait_raise();
+	for (cnt = 0; cnt < 8 && !EVENT; ++cnt) {
+		if (val & 1) {
+			ow_write_one();
+		} else {
+			ow_write_zero();
+		}
+		val >>= 1;
+	}
+}
+
+void enable_pcint(void) {
+	GIFR = _BV(PCIF);
+	GIMSK |= _BV(PCIE);
+}
+
+void disable_pcint(void) {
+	GIMSK &= ~_BV(PCIE);
+}
+
+void ow_wait_reset(void) {
+	enable_pcint();
+	while(1) {
+		cli();
+		if (status != ST_RESET && OW_READ) {
+			LED_ON;
+			sleep_enable();
+			sei();
+			sleep_cpu();
+			sleep_disable();
+		}
+		sei();
+		LED_OFF;
+		if (status == ST_RESET) {
+			break;
+		}
+	}
+	sei();
+	status = ST_NORMAL;
+}
+
+void ow_present(void) {
+	wait_raise();
+	_delay_us(15);
+	OW_PULL_BUS_LOW;
+	_delay_us(T_PRESENCE);
+	OW_RELEASE_BUS;
+}
 
 void ows_init(void) {
-	status = ST_IDLE;
+	status = ST_NORMAL;
 	DBG_INIT;
 	DBG_OUT(status);
 	OW_RELEASE_BUS;
 
-	// set timer 0 to 1us, timer 1 to 2us ticks
-#if F_CPU == 1000000UL
-#	warning "Works correctly only at 16MHz"
-	// timer 0: clkIO clock source, no prescaling
-	TCCR0B |= _BV(CS00);
-	// timer 1: clkIO/2
-	TCCR1 |= _BV(CS11);
-#elif F_CPU == 8000000UL
-#	warning "Works correctly only at 16MHz"
-	// timer 0: clkIO/8 clock source
-	TCCR0B |= _BV(CS01);
-	// timer 1: clkIO/16
-	TCCR1 |= _BV(CS12);
-	TCCR1 |= _BV(CS10);
-#elif F_CPU == 16000000UL
-	// timer 0: clkIO/8 clock source (0.5us, delays adjusted)
-	TCCR0B |= _BV(CS01);
-	// timer1: clkIO/32
-	TCCR1 |= _BV(CS12);
-	TCCR1 |= _BV(CS11);
+#if F_CPU == 8000000UL
+	// timer 0: clkIO/256 clock source, 32ms ticks
+	TCCR0B |= _BV(CS02);
+	OCR0A = T_RESET /32;
 #else
-#	error "Unsupported system frequency (only 1, 8 and 16 MHz supported)"
+#	error "Unsupported system frequency"
 #endif
-	// reset timeout (in 2us units)
-	OCR1A = 200; // a little lower than 400us
 
 	// set up pin change interrupt
-	GIMSK |= _BV(PCIE);
 	PCMSK |= _BV(PCINT3);
+
+	set_sleep_mode(SLEEP_MODE_PWR_DOWN);
 }
 
-void start_reset_timer(void) {
-	RESET_TIMER = 0;
-	TIFR = _BV(OCF1A);
-	TIMSK |= _BV(OCIE1A);
+void reset_timer(void) {
+	TCNT0 = 0;
+	TIFR = _BV(OCF0A);
+	TIFR = _BV(TOV0);
+	TIMSK |= _BV(OCIE0A);
+	TIMSK |= _BV(TOIE0);
 }
 
 void stop_reset_timer(void) {
 	// mask timer interrupt
-	TIMSK &= ~_BV(OCIE1A);
-}
-
-void set_alarm(uint8_t time) {
-	IO_TIMER = 0;
-	// enable timer compare interrupt
-	OCR0A = time;
-	TIFR = _BV(OCF0A);
-	TIMSK |= _BV(OCIE0A);
-}
-
-void clear_alarm(void) {
-	// mask timer interrupt
 	TIMSK &= ~_BV(OCIE0A);
 }
 
-// reset handler
-ISR (TIMER1_COMPA_vect) {
-	stop_reset_timer();
-	status = ST_RESET;
-	DBG_OUT(status);
+void ow_stop_timeout(void) {
+	TIMSK &= ~_BV(TOIE0);
 }
 
-// alarm handler
+// reset handler
 ISR (TIMER0_COMPA_vect) {
-	clear_alarm();
-	if (transmit) {
-		OW_RELEASE_BUS;
-	}
-	switch (status) {
-		case ST_PRESENCE:
-			buf = cnt = 0;
-			status = ST_RECV_ROM;
-			DBG_OUT(status);
-			break;
-		case ST_RECV_ROM:
-			if (OW_READ) {
-				buf |= _BV(cnt);
-			} else {
-				;
-			}
-			cnt++;
-			if (cnt >= 8) {
-				if (buf == CMD_READ_ROM) {
-					status = ST_SEND_ID;
-					DBG_OUT(status);
-					id_cnt = 0;
-					buf = id[id_cnt];
-					cnt = 0;
-				} else {
-					status = ST_IDLE;
-					DBG_OUT(status);
-				}
-			}
-			break;
-		case ST_SEND_ID:
-			// set next bit
-			buf >>= 1;
-			cnt++;
-			if (cnt >= 8) {
-				cnt = 0;
-				id_cnt++;
-				if (id_cnt < 8) {
-					buf = id[id_cnt];
-				} else {
-					// finished, return to idle
-					status = ST_IDLE;
-					DBG_OUT(status);
-				}
-			}
-			break;
-	}
+	disable_pcint();
+	stop_reset_timer();
+	status = ST_RESET;
+}
+
+// timeout handler
+ISR (TIMER0_OVF_vect) {
+	ow_stop_timeout();
+	status = ST_TIMEOUT;
 }
 
 // change is detected on the data pin
 ISR (PCINT0_vect) {
-	if (transmit) {
-		return;
-	}
 	if (!OW_READ) {
 		// read 0
-		start_reset_timer();
-		LED_OFF;
-		switch (status) {
-			case ST_RECV_ROM:
-				// receiving bit
-				set_alarm(T_SAMPLE);
-				break;
-			case ST_SEND_ID:
-				// sending ID
-				if (!(buf & 1)) {
-					// write zero
-					OW_PULL_BUS_LOW;
-				}
-				set_alarm(T_ZERO);
-				break;
-		}
+		reset_timer();
 	} else {
 		// read 1
-		LED_ON;
 		stop_reset_timer();
-		if (status == ST_RESET) {
-			status = ST_PRESENCE;
-			DBG_OUT(status);
-			OW_PULL_BUS_LOW;
-			set_alarm(T_PRESENCE);
-		}
 	}
 }
 
