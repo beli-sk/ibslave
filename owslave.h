@@ -32,7 +32,8 @@
 
 // delays (us)
 #define T_ZERO 45
-#define T_PRESENCE 70
+#define T_PRESENCE_DELAY 20
+#define T_PRESENCE 140
 #define T_SAMPLE 15
 #define T_RESET 400
 

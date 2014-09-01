@@ -180,7 +180,7 @@ void ow_wait_reset(void) {
 // send presence pulse
 void ow_present(void) {
 	wait_raise();
-	_delay_us(15);
+	_delay_us(T_PRESENCE_DELAY);
 	OW_PULL_BUS_LOW;
 	_delay_us(T_PRESENCE);
 	OW_RELEASE_BUS;
